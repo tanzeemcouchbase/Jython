@@ -137,18 +137,15 @@ class CBASScanConsistency(CBASBaseTest):
             try:
                 response, _, _, results, _ = self.cbas_util.execute_statement_on_cbas_util(query, scan_consistency=self.scan_consistency, scan_wait=self.scan_wait)
                 self.assertEqual(response, "success", "Query failed...")
-                output.append(results[0]['$1'])
-                if results[0]['$1'] == self.num_items:
+                dataset_count = results[0]['$1']
+                if dataset_count == self.num_items:
                     break
             except Exception as e:
                 self.log.info('Try again as memcached might be recovering...')
         
         self.log.info('Verify dataset count is equal to number of items in KV')
-        output = sorted(set(output))
-        print(output)
         count_n1ql = self.rest.query_tool('select count(*) from %s' % self.cb_bucket_name)['results'][0]['$1']
-        self.assertTrue(len(output) == 2, msg='Post rollback scan_consistency request_plus must result in %s dataitems' % count_n1ql)
-        self.assertEqual(output[0], count_n1ql, msg='KV-CBAS count mismatch. Actual %s, expected %s' % (dataset_count, count_n1ql))
+        self.assertEqual(dataset_count, count_n1ql, msg='KV-CBAS count mismatch. Actual %s, expected %s' % (dataset_count, count_n1ql))
     
     """
     cbas.cbas_scan_consistency.CBASScanConsistency.test_scan_consistency_with_analytics_failover,scan_consistency=request_plus,scan_wait=1m,default_bucket=True,cb_bucket_name=default,cbas_dataset_name=ds,items=50000
