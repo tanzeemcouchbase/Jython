@@ -145,6 +145,7 @@ class CBASScanConsistency(CBASBaseTest):
         
         self.log.info('Verify dataset count is equal to number of items in KV')
         output = sorted(set(output))
+        print(output)
         count_n1ql = self.rest.query_tool('select count(*) from %s' % self.cb_bucket_name)['results'][0]['$1']
         self.assertTrue(len(output) == 2, msg='Post rollback scan_consistency request_plus must result in %s dataitems' % count_n1ql)
         self.assertEqual(output[0], count_n1ql, msg='KV-CBAS count mismatch. Actual %s, expected %s' % (dataset_count, count_n1ql))
