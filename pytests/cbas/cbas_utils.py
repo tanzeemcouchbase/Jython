@@ -33,7 +33,8 @@ class cbas_utils():
 #         self.bucket_util.create_default_bucket()
 #         self.createConn("default")
     
-    def execute_statement_on_cbas_util(self, statement, mode=None, rest=None, timeout=120, client_context_id=None, username=None, password=None, analytics_timeout=120, time_out_unit="s"):
+    def execute_statement_on_cbas_util(self, statement, mode=None, rest=None, timeout=120, client_context_id=None, username=None, password=None,
+                                       analytics_timeout=120, time_out_unit="s", scan_consistency=None, scan_wait=None):
         """
         Executes a statement on CBAS using the REST API using REST Client
         """
@@ -41,7 +42,8 @@ class cbas_utils():
         try:
             log.info("Running query on cbas: %s"%statement)
             response = self.cbas_helper.execute_statement_on_cbas(statement, mode, pretty,
-                                                      timeout, client_context_id, username, password, analytics_timeout=analytics_timeout, time_out_unit=time_out_unit)
+                                                      timeout, client_context_id, username, password, analytics_timeout=analytics_timeout, time_out_unit=time_out_unit,
+                                                      scan_consistency=scan_consistency, scan_wait=scan_wait)
             if type(response) == str: 
                 response = json.loads(response)
             if "errors" in response:
