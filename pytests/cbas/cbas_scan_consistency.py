@@ -290,6 +290,8 @@ class CBASScanConsistency(CBASBaseTest):
         self.cluster.bucket_flush(server=self.master, bucket=self.cb_bucket_name)
         
         self.log.info('Validate count')
+        count_n1ql = self.rest.query_tool('select count(*) from %s' % self.cb_bucket_name)['results'][0]['$1']
+        print(count_n1ql)
         query = 'select count(*) from %s' % self.cbas_dataset_name
         response, _, _, results, _ = self.cbas_util.execute_statement_on_cbas_util(query, scan_consistency=self.scan_consistency, scan_wait=self.scan_wait)
         self.assertEqual(response, "success", "Query failed...")
