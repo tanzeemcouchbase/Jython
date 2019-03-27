@@ -27,7 +27,8 @@ class CBASHelper(RestConnection):
     
     def execute_statement_on_cbas(self, statement, mode, pretty=True,
                                   timeout=70, client_context_id=None,
-                                  username=None, password=None,analytics_timeout=120, time_out_unit="s"):
+                                  username=None, password=None,analytics_timeout=120, time_out_unit="s",
+                                  scan_consistency=None, scan_wait=None):
         if not username:
             username = self.username
         if not password:
@@ -37,6 +38,13 @@ class CBASHelper(RestConnection):
 
         params = {'statement': statement, 'mode': mode, 'pretty': pretty,
                   'client_context_id': client_context_id, 'timeout': str(analytics_timeout) + time_out_unit}
+        
+        if scan_consistency is not None:
+           params['scan_consistency'] = scan_consistency
+            
+        if scan_wait is not None:
+            params['scan_wait'] = scan_wait
+    
         params = json.dumps(params)
         status, content, header = self._http_request(api, 'POST',
                                                      headers=headers,
