@@ -225,7 +225,7 @@ class CBASScanConsistency(CBASBaseTest):
                 self.assertEqual(response_with_scan, "success", "Query failed...")
                 output_with_scan.append(results_with_scan[0]['$1'])
                 
-                response_without_scan, _, _, results_without_scan, _ = self.cbas_util.execute_statement_on_cbas_util(query)
+                response_without_scan, _, _, results_without_scan, _ = self.cbas_util.execute_statement_on_cbas_util(query, scan_consistency='not_bounded')
                 self.assertEqual(response_without_scan, "success", "Query failed...")
                 output_without_scan.append(results_without_scan[0]['$1'])
                 
