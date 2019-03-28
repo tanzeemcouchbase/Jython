@@ -288,18 +288,19 @@ class CBASScanConsistency(CBASBaseTest):
         
         self.log.info('Validate count')
         count_n1ql = self.rest.query_tool('select count(*) from %s' % self.cb_bucket_name)['results'][0]['$1']
-        print(count_n1ql)
         query = 'select count(*) from %s' % self.cbas_dataset_name
+        dataset_count = []
         start_time = time.time()
-        while time.time() < start_time + 30:
+        while time.time() < start_time + 120:
             try:
                 response, _, _, results, _ = self.cbas_util.execute_statement_on_cbas_util(query, scan_consistency=self.scan_consistency, scan_wait=self.scan_wait)
-                dataset_count = results[0]['$1']
-                print(dataset_count)
-            except:
-                pass
-            
-        #self.assertEqual(response, "success", "Query failed...")
-        #dataset_count = results[0]['$1']
-        #print(dataset_count)
-        #self.assertEqual(dataset_count, 0, msg='KV-CBAS count mismatch. Actual %s, expected %s' % (dataset_count, 0))
+                self.assertEqual(response, "success", "Query failed...")
+                dataset_count.append(results[0]['$1'])
+                if results[0]['$1'] == 0:
+                    break
+            except Exception as e:
+                self.log.info('Neglect failures related to bucket disconnect...')
+        dataset_count = sorted(list(set(dataset_count)))
+        if len(dataset_count) > 1:
+            self.assertEqual(len(dataset_count), 2, msg='In case of full rollback the dataset count must reduce from %s to 0' % self.num_items)
+        self.assertEqual(dataset_count[0], 0, msg='KV-CBAS count mismatch. Actual %s, expected %s' % (dataset_count, 0))
