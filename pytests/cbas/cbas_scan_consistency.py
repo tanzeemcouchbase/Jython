@@ -28,10 +28,15 @@ class CBASScanConsistency(CBASBaseTest):
         self.scan_consistency = self.input.param('scan_consistency', None)
         self.scan_wait = self.input.param('scan_wait', None)
     
-    """
-    cbas.cbas_scan_consistency.CBASScanConsistency.test_scan_consistency_parameters,default_bucket=True,cb_bucket_name=default,cbas_dataset_name=ds,items=50000
-    """
     def test_scan_consistency_parameters(self):
+        
+        self.log.info('Execute SQL++ query with all scan_wait parameters')
+        query = "select 1"
+        scan_waits = ['10ns', '10us', '10ms', '5s', '1m', '1h', '0.1m']
+        for wait in scan_waits:
+            response, _, _, results, _ = self.cbas_util.execute_statement_on_cbas_util(query, scan_wait=wait)
+            self.assertEqual(response, "success", "Query failed")
+            self.assertEqual(results[0]['$1'], 1, msg="Query result mismatch")
         
         self.log.info('Execute SQL++ query with incorrect scan_consistency parameters')
         query = "select 1"
@@ -45,6 +50,12 @@ class CBASScanConsistency(CBASBaseTest):
         self.assertEqual(response, "fatal", "Query must fail as scan consistency parameter is not supported")
         self.assertEqual(error[0]['msg'], 'Unknown duration unit Y', msg='Error message mismatch')
         self.assertEqual(error[0]['code'], 21001, msg='Error code mismatch')
+        
+        self.log.info('Execute SQL++ query with incorrect scan_wait unit parameters')
+        response, _, error, _, _ = self.cbas_util.execute_statement_on_cbas_util(query, scan_wait='1')
+        self.assertEqual(response, "fatal", "Query must fail as scan consistency parameter is not supported")
+        self.assertEqual(error[0]['msg'], 'Invalid duration "1"', msg='Error message mismatch')
+        self.assertEqual(error[0]['code'], 21000, msg='Error code mismatch')
         
         self.log.info('Load documents in the default bucket')
         self.perform_doc_ops_in_all_cb_buckets(self.num_items, "create", 0, self.num_items)
@@ -74,9 +85,6 @@ class CBASScanConsistency(CBASBaseTest):
         self.assertEqual(error[0]['msg'], 'Bucket default on link Local in dataverse Default is not connected', msg='Error message mismatch')
         self.assertEqual(error[0]['code'], 23027, msg='Error code mismatch')
 
-    """
-    cbas.cbas_scan_consistency.CBASScanConsistency.test_scan_consistency_parameters_are_logged,default_bucket=False,scan_consistency=request_plus,scan_wait=1m
-    """
     def test_scan_consistency_parameters_are_logged(self):
 
         self.log.info('Execute SQL++ query with scan_consistency and scan_wait')
@@ -100,9 +108,6 @@ class CBASScanConsistency(CBASBaseTest):
         self.assertTrue('"scanWait":"%s"' % self.scan_wait in ''.join(result), msg="'scanWait' not logged")
         shell.disconnect()
     
-    """
-    cbas.cbas_scan_consistency.CBASScanConsistency.test_scan_consistency_with_memcached_crash,scan_consistency=request_plus,scan_wait=1m,default_bucket=True,cb_bucket_name=default,cbas_dataset_name=ds,items=50000
-    """
     def test_scan_consistency_post_memcached_crash(self):
         
         self.log.info('Load documents in the default bucket')
@@ -147,9 +152,6 @@ class CBASScanConsistency(CBASBaseTest):
         count_n1ql = self.rest.query_tool('select count(*) from %s' % self.cb_bucket_name)['results'][0]['$1']
         self.assertEqual(dataset_count, count_n1ql, msg='KV-CBAS count mismatch. Actual %s, expected %s' % (dataset_count, count_n1ql))
     
-    """
-    cbas.cbas_scan_consistency.CBASScanConsistency.test_scan_consistency_with_analytics_failover,scan_consistency=request_plus,scan_wait=1m,default_bucket=True,cb_bucket_name=default,cbas_dataset_name=ds,items=50000
-    """   
     def test_scan_consistency_post_analytics_failover(self):
         
         self.log.info('Load documents in the default bucket')
@@ -191,9 +193,6 @@ class CBASScanConsistency(CBASBaseTest):
         count_n1ql = self.rest.query_tool('select count(*) from %s' % self.cb_bucket_name)['results'][0]['$1']
         self.assertEqual(dataset_count, count_n1ql, msg='KV-CBAS count mismatch. Actual %s, expected %s' % (dataset_count, count_n1ql))
     
-    """
-    cbas.cbas_scan_consistency.CBASScanConsistency.test_scan_consistency_with_kv_mutations,scan_consistency=request_plus,scan_wait=1m,default_bucket=True,cb_bucket_name=default,cbas_dataset_name=ds,items=50000
-    """
     def test_scan_consistency_with_kv_mutations(self):
         
         self.log.info('Load documents in the default bucket')
@@ -244,9 +243,6 @@ class CBASScanConsistency(CBASBaseTest):
         count_n1ql = self.rest.query_tool('select count(*) from %s' % self.cb_bucket_name)['results'][0]['$1']
         self.assertEqual(cbas_datasets[len(cbas_datasets)-1], count_n1ql, msg='KV-CBAS count mismatch. Actual %s, expected %s' % (dataset_count, count_n1ql))
     
-    """
-    cbas.cbas_scan_consistency.CBASScanConsistency.test_scan_consistency_after_kv_documents_load,scan_consistency=request_plus,scan_wait=1m,default_bucket=True,cb_bucket_name=default,cbas_dataset_name=ds,items=300000
-    """
     def test_scan_consistency_post_kv_documents_load(self):
         
         self.log.info('Load documents in the default bucket')
@@ -266,9 +262,6 @@ class CBASScanConsistency(CBASBaseTest):
         count_n1ql = self.rest.query_tool('select count(*) from %s' % self.cb_bucket_name)['results'][0]['$1']
         self.assertEqual(dataset_count, count_n1ql, msg='KV-CBAS count mismatch. Actual %s, expected %s' % (dataset_count, count_n1ql))
     
-    """
-    cbas.cbas_scan_consistency.CBASScanConsistency.test_scan_consistency_after_kv_bucket_flush,scan_consistency=request_plus,scan_wait=1m,default_bucket=True,cb_bucket_name=default,cbas_dataset_name=ds,items=300000
-    """
     def test_scan_consistency_post_kv_bucket_flush(self):
         
         self.log.info('Load documents in the default bucket')
@@ -304,3 +297,54 @@ class CBASScanConsistency(CBASBaseTest):
         if len(dataset_count) > 1:
             self.assertEqual(len(dataset_count), 2, msg='In case of full rollback the dataset count must reduce from %s to 0' % self.num_items)
         self.assertEqual(dataset_count[0], 0, msg='KV-CBAS count mismatch. Actual %s, expected %s' % (dataset_count, 0))
+    
+    def test_kv_topology_change_does_not_impact_scan_consistency(self):
+        
+        self.log.info('Load documents in the default bucket')
+        self.perform_doc_ops_in_all_cb_buckets(self.num_items, "create", 0, self.num_items)
+        
+        self.log.info('Create dataset')
+        self.cbas_util.create_dataset_on_bucket(self.cb_bucket_name, self.cbas_dataset_name)
+        
+        self.log.info('Connect link')
+        self.cbas_util.connect_link()
+        
+        self.log.info('Add an extra KV node')
+        self.add_node(self.servers[1], rebalance=True, wait_for_rebalance_completion=False)
+        
+        self.log.info('Validate count')
+        query = 'select count(*) from %s' % self.cbas_dataset_name
+        response, _, _, results, _ = self.cbas_util.execute_statement_on_cbas_util(query, scan_consistency=self.scan_consistency, scan_wait=self.scan_wait)
+        self.assertEqual(response, "success", "Query failed...")
+        dataset_count = results[0]['$1']
+        count_n1ql = self.rest.query_tool('select count(*) from %s' % self.cb_bucket_name)['results'][0]['$1']
+        self.assertEqual(dataset_count, count_n1ql, msg='KV-CBAS count mismatch. Actual %s, expected %s' % (dataset_count, count_n1ql))
+    
+    def test_analytics_topology_change_does_not_impact_scan_consistency(self):
+        
+        self.log.info('Load documents in the default bucket')
+        self.perform_doc_ops_in_all_cb_buckets(self.num_items, "create", 0, self.num_items)
+        
+        self.log.info('Create dataset')
+        self.cbas_util.create_dataset_on_bucket(self.cb_bucket_name, self.cbas_dataset_name)
+        
+        self.log.info('Connect link')
+        self.cbas_util.connect_link()
+        
+        self.log.info('Add an extra KV node')
+        self.add_node(self.cbas_servers[0], rebalance=True, wait_for_rebalance_completion=False)
+        
+        self.log.info('Validate count')
+        query = 'select count(*) from %s' % self.cbas_dataset_name
+        count_n1ql = self.rest.query_tool('select count(*) from %s' % self.cb_bucket_name)['results'][0]['$1']
+        start_time = time.time()
+        dataset_count = 0
+        while time.time() < start_time + 300:
+            try:
+                response, _, _, results, _ = self.cbas_util.execute_statement_on_cbas_util(query, scan_consistency=self.scan_consistency)
+                self.assertEqual(response, "success", "Query failed...")
+                dataset_count = results[0]['$1']
+                break
+            except Exception as e:
+                self.log.info('Neglect analytics server recovery errors...')
+        self.assertEqual(dataset_count, count_n1ql, msg='KV-CBAS count mismatch. Actual %s, expected %s' % (dataset_count, count_n1ql))
