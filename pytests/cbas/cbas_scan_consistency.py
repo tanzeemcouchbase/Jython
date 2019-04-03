@@ -499,3 +499,31 @@ class CBASScanConsistency(CBASBaseTest):
         self.assertEqual(response, "success", "Query failed...")
         dataset_count = results[0]['$1']
         self.assertEqual(dataset_count, self.num_items, msg='KV-CBAS update count mismatch. Actual %s, expected %s' % (dataset_count, self.num_items))
+    
+    def test_scan_consistency_with_timeout(self):
+        
+        self.log.info('Load documents in the default bucket')
+        self.perform_doc_ops_in_all_cb_buckets(self.num_items, "create", 0, self.num_items)
+        
+        self.log.info('Create dataset')
+        self.cbas_util.create_dataset_on_bucket(self.cb_bucket_name, self.cbas_dataset_name)
+        
+        self.log.info('Connect link')
+        self.cbas_util.connect_link()
+        
+        self.log.info('Verify query times out despite scan_wait')
+        query = 'select * from %s&scan_consistency=request_plus&scan_wait=1m&timeout=1s' % self.cbas_dataset_name
+        cbas_url = "http://{0}:{1}/analytics/service".format(self.cbas_node.ip, 8095)
+        start_time = time.time()
+        service_timeout = False
+        shell = RemoteMachineShellConnection(self.cbas_node)
+        while time.time() < start_time + 120:
+            output, error = shell.execute_command("curl -X POST {0} -u {1}:{2} -d 'statement={3}'".format(cbas_url, "Administrator", "password", query))
+            self.log.info(output)
+            self.log.info(error)
+            if 'Request timed out and will be cancelled' in str(output):
+                self.log.info("Hit Request timed out")
+                service_timeout = True
+                break
+        self.assertTrue(service_timeout, msg='Query failed to timeout')
+        
