@@ -1,10 +1,12 @@
 import time
+from threading import Thread
 
 from cbas.cbas_base import CBASBaseTest
 from remote.remote_util import RemoteMachineShellConnection
 from testconstants import WIN_COUCHBASE_LOGS_PATH, LINUX_COUCHBASE_LOGS_PATH
 from lib.memcached.helper.data_helper import MemcachedClientHelper
 from couchbase_helper.tuq_generators import JsonGenerator
+from couchbase_helper.documentgenerator import DocumentGenerator
 
 
 class CBASScanConsistency(CBASBaseTest):
@@ -20,6 +22,15 @@ class CBASScanConsistency(CBASBaseTest):
         else:
             raise ValueError('Path unknown for os type {0}'.format(os))
         return path
+    
+    @staticmethod
+    def generate_documents(start_at, end_at):
+        age = range(70)
+        first = ['james', 'sharon', 'dave', 'bill', 'mike', 'steve']
+        profession = ['doctor', 'lawyer']
+        template = '{{ "number": {0}, "first_name": "{1}" , "profession":"{2}", "mutated":0}}'
+        documents = DocumentGenerator('test_docs', template, age, first, profession, start=start_at, end=end_at)
+        return documents
 
     def setUp(self):
         super(CBASScanConsistency, self).setUp()
@@ -80,6 +91,7 @@ class CBASScanConsistency(CBASBaseTest):
         self.cbas_util.disconnect_link()
         
         self.log.info('Execute SQL++ query with link disconnected')
+        query = 'select * from %s' % self.cbas_dataset_name
         response, _, error, _, _ = self.cbas_util.execute_statement_on_cbas_util(query, scan_consistency='request_plus', scan_wait='1ns')
         self.assertEqual(response, "fatal", "Query must fail as KV bucket is disconnected")
         self.assertEqual(error[0]['msg'], 'Bucket default on link Local in dataverse Default is not connected', msg='Error message mismatch')
@@ -348,3 +360,142 @@ class CBASScanConsistency(CBASBaseTest):
             except Exception as e:
                 self.log.info('Neglect analytics server recovery errors...')
         self.assertEqual(dataset_count, count_n1ql, msg='KV-CBAS count mismatch. Actual %s, expected %s' % (dataset_count, count_n1ql))
+        
+        self.log.info('Load more documents in the default bucket')
+        self.perform_doc_ops_in_all_cb_buckets(self.num_items * 2, "create", self.num_items, self.num_items * 2)
+        
+        self.log.info('Validate count post uploading more documents')
+        response, _, _, results, _ = self.cbas_util.execute_statement_on_cbas_util(query, scan_consistency=self.scan_consistency, scan_wait=self.scan_wait)
+        self.assertEqual(response, "success", "Query failed...")
+        dataset_count = results[0]['$1']
+        count_n1ql = self.rest.query_tool('select count(*) from %s' % self.cb_bucket_name)['results'][0]['$1']
+        self.assertEqual(dataset_count, count_n1ql, msg='KV-CBAS count mismatch. Actual %s, expected %s' % (dataset_count, count_n1ql))
+        
+    def test_scan_consistency_during_analytics_failover(self):
+        
+        self.log.info('Load documents in the default bucket')
+        self.perform_doc_ops_in_all_cb_buckets(self.num_items, "create", 0, self.num_items)
+        
+        self.log.info('Add a cbas node')
+        self.assertTrue(self.add_node(self.cbas_servers[0], services=["cbas"], rebalance=True), msg="Failed to add CBAS node")
+        
+        self.log.info('Create dataset')
+        self.cbas_util.create_dataset_on_bucket(self.cb_bucket_name, self.cbas_dataset_name)
+        
+        self.log.info('Connect link')
+        self.cbas_util.connect_link()
+        
+        self.log.info('Verify dataset count')
+        self.cbas_util.validate_cbas_dataset_items_count(self.cbas_dataset_name, self.num_items)
+        
+        self.log.info('fail-over the node')
+        fail_task = self._cb_cluster.async_failover(self.input.servers, [self.cbas_servers[0]], False)
+        
+        self.log.info('Validate count while failover is in progress')
+        dataset_count = 0
+        start_time = time.time()
+        while time.time() < start_time + 120:
+            try:
+                query = 'select count(*) from %s' % self.cbas_dataset_name
+                response, _, _, results, _ = self.cbas_util.execute_statement_on_cbas_util(query, scan_consistency=self.scan_consistency, scan_wait=self.scan_wait)
+                self.assertEqual(response, "success", "Query failed...")
+                dataset_count = results[0]['$1']
+                break
+            except Exception as e:
+                self.log.info('Rebalance to remove failover node')
+                fail_task.get_result()
+                self.rebalance(wait_for_completion=True)
+        
+        self.log.info('Verify dataset count is equal to number of items in KV')
+        count_n1ql = self.rest.query_tool('select count(*) from %s' % self.cb_bucket_name)['results'][0]['$1']
+        self.assertEqual(dataset_count, count_n1ql, msg='KV-CBAS count mismatch. Actual %s, expected %s' % (dataset_count, count_n1ql))
+    
+    """
+    test_scan_consistency_with_async_doc_delete,scan_consistency=request_plus,scan_wait=1m,default_bucket=True,cb_bucket_name=default,cbas_dataset_name=ds,items=10000
+    """
+    def test_scan_consistency_with_async_doc_delete(self):
+        
+        self.log.info('Load documents in the default bucket')
+        load_gen = CBASScanConsistency.generate_documents(0, self.num_items)
+        tasks = self._async_load_all_buckets(server=self.master, kv_gen=load_gen, op_type="create", exp=0, batch_size=5000)
+        for task in tasks:
+            self.log.info(task.get_result())
+        
+        self.log.info('Create dataset')
+        self.cbas_util.create_dataset_on_bucket(self.cb_bucket_name, self.cbas_dataset_name)
+        
+        self.log.info('Connect link')
+        self.cbas_util.connect_link()
+        
+        self.log.info('Verify dataset count')
+        self.cbas_util.validate_cbas_dataset_items_count(self.cbas_dataset_name, self.num_items)
+        
+        self.log.info('Async perform doc delete')
+        load_gen = CBASScanConsistency.generate_documents(0, self.num_items / 2)
+        tasks = self._async_load_all_buckets(server=self.master, kv_gen=load_gen, op_type="delete", exp=0, batch_size=10)
+        
+        def async_doc_ops():
+            for task in tasks:
+                self.sleep(1, message='Sleep before deleting more records')
+                self.log.info(task.get_result())
+                
+        async_doc_ops = Thread(target=async_doc_ops, args=())
+        async_doc_ops.start()
+        
+        self.log.info('Validate count post uploading more documents')
+        query = 'select count(*) from %s' % self.cbas_dataset_name
+        self.sleep(10, message='Wait for a few records to be deleted')
+        response, _, _, results, _ = self.cbas_util.execute_statement_on_cbas_util(query, scan_consistency=self.scan_consistency, scan_wait=self.scan_wait)
+        self.assertEqual(response, "success", "Query failed...")
+        dataset_count = results[0]['$1']
+        self.assertTrue(dataset_count < self.num_items, msg='CBAS count must be less than %s' % (self.num_items))
+        
+        self.log.info('Wait for async delete to complete')
+        async_doc_ops.join()
+        response, _, _, results, _ = self.cbas_util.execute_statement_on_cbas_util(query, scan_consistency=self.scan_consistency, scan_wait=self.scan_wait)
+        self.assertEqual(response, "success", "Query failed...")
+        dataset_count = results[0]['$1']
+        self.assertEqual(dataset_count, self.num_items/2, msg='KV-CBAS count mismatch. Actual %s, expected %s' % (dataset_count, self.num_items/2))
+    
+    """
+    test_scan_consistency_with_async_doc_updates,scan_consistency=request_plus,scan_wait=1m,default_bucket=True,cb_bucket_name=default,cbas_dataset_name=ds,items=10000
+    """
+    def test_scan_consistency_with_async_doc_updates(self):
+
+        self.log.info('Load documents in the default bucket')
+        self.perform_doc_ops_in_all_cb_buckets(self.num_items, "create", 0, self.num_items)
+        
+        self.log.info("Create primary index")
+        query = "CREATE PRIMARY INDEX ON {0} using gsi".format(self.cb_bucket_name)
+        self.rest.query_tool(query)
+        
+        self.log.info('Create dataset')
+        self.cbas_util.create_dataset_on_bucket(self.cb_bucket_name, self.cbas_dataset_name)
+        
+        self.log.info('Connect link')
+        self.cbas_util.connect_link()
+
+        self.log.info('Async update documents')
+        def async_doc_ops():
+            for i in range(0, self.num_items + self.num_items/10, self.num_items/10):
+                self.rest.query_tool('update %s set profession = "pilot" limit %s' % (self.cb_bucket_name, i))
+        async_doc_ops = Thread(target=async_doc_ops, args=())
+        async_doc_ops.start()
+        
+        self.log.info('Validate count')
+        dataset_counts = []
+        while True:
+            query = 'select count(*) from %s where profession = "pilot"' % self.cbas_dataset_name
+            response, _, _, results, _ = self.cbas_util.execute_statement_on_cbas_util(query, scan_consistency=self.scan_consistency, scan_wait=self.scan_wait)
+            self.assertEqual(response, "success", "Query failed...")
+            dataset_count = results[0]['$1']
+            dataset_counts.append(dataset_count)
+            if dataset_count == self.num_items:
+                break
+        
+        self.log.info('Wait for async updates to complete')
+        self.assertTrue(dataset_counts == sorted(dataset_counts), msg='Dataset count must be increasing order as documents are getting updated')
+        response, _, _, results, _ = self.cbas_util.execute_statement_on_cbas_util(query, scan_consistency=self.scan_consistency, scan_wait=self.scan_wait)
+        self.assertEqual(response, "success", "Query failed...")
+        dataset_count = results[0]['$1']
+        self.assertEqual(dataset_count, self.num_items, msg='KV-CBAS update count mismatch. Actual %s, expected %s' % (dataset_count, self.num_items))
